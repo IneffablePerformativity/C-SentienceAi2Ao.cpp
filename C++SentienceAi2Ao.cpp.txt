@@ -1,0 +1,180 @@
+// C++SentienceAi2Ao.cpp
+// 
+// Basically, I see that the Adobe PDF Reader's export as text feature
+// MIGHT make an output file with every token on a separate new line.
+// 
+// However, in the past, I have also seen longer text on each line.
+// I have not debugged this code with those PDFs,
+// As I am in a big hurry to read a certain document!
+//
+// Also I rid all unicodes for now. That might be unwise.
+//
+// The naming was meant to suggest sentence recognition, as
+// I might add in the UNICODE sentence recognition heuristic.
+
+
+#include <iostream>
+#include <fstream>
+
+using namespace std;
+
+enum parse {
+    nothing,
+    inText,
+    firstNL,
+    multiNL,
+};
+
+static string aFewPeriods(int nPeriods) {
+    // Output a few, but not a lot, of scheduled dots, periods.
+    // Actually, caller will output them. Passing ofs was hard.
+    int limit = nPeriods;
+    if (limit > 5)
+        limit = 5;
+    return string(limit, '.');
+}
+
+int main()
+{
+    // std::cout << "Hello World!\n";
+    ifstream ifs;
+    ofstream ofs;
+    ifs.open("C:\\a\\ai.txt", ios::in);
+    ofs.open("C:\\a\\ao.txt", ios::out);
+
+    // plan:
+    // discard formfeeds.
+    // change any tabs to spaces.
+    // reduce multiple spaces to one space.
+    // discard newlines unless 2+ in a row,
+    // optionally with all whitespace after,
+    // which sequence replace with 2 cr,lf.
+    // but single NLs, change to 1 space!
+    // also shorten runs of dots, periods.
+
+    char ch = ' ';
+    char priorCh = ' ';
+
+    parse state = nothing;
+
+    int nNewlines = 0;
+    int nSpaces = 0;
+    int nPeriods = 0;
+
+    while (ifs >> noskipws >> ch) {
+
+        // change any tab to one space
+        if (ch == '\t')
+            ch = ' ';
+
+        // rid any low control chars, save CR,LF
+        if (ch < ' ' && ch != '\r' && ch != '\n')
+            continue;
+
+        // rid any high non-USASCII chars, unicodes
+        if (ch > '~') {
+            continue;
+        }
+
+        // now, recognize input newlines.
+
+        if (ch == '\n' || ch == '\r') {
+            // Especially, may have a period at end of sentences before a newline.
+            if (nPeriods > 0)
+            {
+                ofs << aFewPeriods(nPeriods);
+                nPeriods = 0;
+            }
+            // now condense CR+LF
+            if (ch == '\n' && priorCh != '\r'
+                ||
+                ch == '\r')
+            {
+                switch (nNewlines++) {
+                case 0:
+                    state = firstNL;
+                    break;
+                default:
+                    state = multiNL;
+                    break;
+                }
+            }
+            // do not immediately output CR or LF (nor perhaps a space for it) yet.
+            continue;
+        }
+        priorCh = ch; // to be used just above for the CR+LF check.
+
+        // what if current char IS a space?
+        if (ch == ' ')
+        {
+            // Might very well have a period at end of sentences before a space.
+            if (nPeriods > 0)
+            {
+                // AND may be holding even prior spaces:
+                if (nSpaces > 0) {
+                    ofs << " ";
+                    nSpaces = 0;
+                }
+                ofs << aFewPeriods(nPeriods);
+                nPeriods = 0;
+            }
+            // spaces do not change current mode.
+            nSpaces ++;
+            // do not immediately output spaces
+            continue;
+        }
+
+        // if a printable, but not a space
+        if (ch > ' ' && ch <= '~')
+        {
+            // a printable, not space, keeps or starts inText mode.
+            if (state == multiNL)
+            {
+                // Output two newlines to separate paragraphs
+                // This is an extra output here, before my current character.
+                ofs << "\n\n"; // no \r here, which makes 4, not 2 newlines.
+                nSpaces = 0; // cancel any spaces pending
+            }
+            if (state == firstNL)
+            {
+                // Output one space (instead of CR,LF) to separate words.
+                // This is an extra output here, before my current character.
+                ofs << " ";
+                nSpaces = 0; // cancel any more space pending
+            }
+            if (state == inText && nSpaces > 0)
+            {
+                // Insert a single space after having seen one or multiple spaces
+                // This is an extra output here, before my current character.
+                ofs << " ";
+                nSpaces = 0;
+            }
+            if (state == inText && nPeriods > 0 && ch != '.')
+            {
+                ofs << aFewPeriods(nPeriods);
+                nPeriods = 0;
+            }
+
+            // hold off outputting dots, i.e., periods.
+            if (ch == '.') {
+                // as I said, keep or start inText mode.
+                state = inText;
+                nNewlines = 0;
+                // nSpaces = 0; // is it right to cancel even-prior spaces? No.
+                nPeriods ++;
+            }
+            else {
+                // output current printable non-space non-period character.
+                ofs << ch;
+                // as I said, keep or start inText mode.
+                state = inText;
+                nNewlines = 0;
+                nSpaces = 0;
+                nPeriods = 0;
+            }
+        }
+    }
+    ifs.close();
+    ofs.close();
+}
+
